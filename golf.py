@@ -1,17 +1,18 @@
 # GOLF SWING INSTANT REPLAY (OFFLINE VOICE CONTROL)
 #
 # This application uses offline voice commands to control a capture/replay loop.
-# - Say "ok" to start recording a 15-second clip.
-# - During replay, say "ok" again to skip the replay and return to listening.
+# - Say "okay" to start recording a 5-second clip.
+# - During replay, say "okay" again to skip the replay and return to listening.
 #
 # Created by Gemini
 #
 # REQUIRES:
-# 1. pip install opencv-python vosk pyaudio numpy
+# 1. pip install opencv-python vosk pyaudio
 # 2. Download a Vosk language model. For English, a small model can be found here:
 #    https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
 # 3. Unzip the model and place the resulting folder (e.g., "vosk-model-small-en-us-0.15")
 #    in the same directory as this Python script.
+# 4. Place a sound file named "chime.wav" in the same directory as this script.
 
 import cv2
 import time
@@ -20,7 +21,7 @@ import threading
 import json
 import os
 import pyaudio
-import numpy as np
+import wave
 from vosk import Model, KaldiRecognizer
 
 # --- Configuration -----------------------------------------------------------
@@ -41,31 +42,42 @@ TRIGGER_WORD = "okay"
 # UPDATE THIS if you place the model folder elsewhere.
 MODEL_PATH = "vosk-model-small-en-us-0.15"
 
+# Path to the confirmation chime sound file.
+CHIME_WAV_PATH = "chime.wav"
+
 # --- End of Configuration ----------------------------------------------------
 
 # A thread-safe event to signal that the trigger word has been spoken.
 trigger_word_event = threading.Event()
 
 def play_chime():
-    """Generates and plays a short sine wave tone as an audible confirmation."""
+    """Plays a .wav file as an audible confirmation."""
+    if not os.path.exists(CHIME_WAV_PATH):
+        print(f"Chime file not found: {CHIME_WAV_PATH}")
+        return
+
     try:
+        # Open the wave file
+        wf = wave.open(CHIME_WAV_PATH, 'rb')
         p = pyaudio.PyAudio()
-        volume = 1     # range [0.0, 1.0]
-        fs = 44100       # sampling rate, Hz
-        duration = 0.15  # seconds
-        f = 880.0        # sine frequency, Hz (A5 note)
 
-        # Generate samples
-        samples = (np.sin(2 * np.pi * np.arange(fs * duration) * f / fs)).astype(np.float32)
+        # Open a stream
+        stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
+                        channels=wf.getnchannels(),
+                        rate=wf.getframerate(),
+                        output=True)
 
-        # Open stream and play
-        stream = p.open(format=pyaudio.paFloat32, channels=1, rate=fs, output=True)
-        stream.write(volume * samples)
+        # Read and play data in chunks
+        data = wf.readframes(1024)
+        while data:
+            stream.write(data)
+            data = wf.readframes(1024)
 
         # Clean up
         stream.stop_stream()
         stream.close()
         p.terminate()
+        wf.close()
     except Exception as e:
         print(f"Error playing chime: {e}")
 
