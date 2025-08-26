@@ -7,7 +7,7 @@
 # Created by Gemini
 #
 # REQUIRES:
-# 1. pip install opencv-python vosk pyaudio
+# 1. pip install opencv-python vosk pyaudio numpy
 # 2. Download a Vosk language model. For English, a small model can be found here:
 #    https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
 # 3. Unzip the model and place the resulting folder (e.g., "vosk-model-small-en-us-0.15")
@@ -20,6 +20,7 @@ import threading
 import json
 import os
 import pyaudio
+import numpy as np
 from vosk import Model, KaldiRecognizer
 
 # --- Configuration -----------------------------------------------------------
@@ -44,6 +45,30 @@ MODEL_PATH = "vosk-model-small-en-us-0.15"
 
 # A thread-safe event to signal that the trigger word has been spoken.
 trigger_word_event = threading.Event()
+
+def play_chime():
+    """Generates and plays a short sine wave tone as an audible confirmation."""
+    try:
+        p = pyaudio.PyAudio()
+        volume = 1     # range [0.0, 1.0]
+        fs = 44100       # sampling rate, Hz
+        duration = 0.15  # seconds
+        f = 880.0        # sine frequency, Hz (A5 note)
+
+        # Generate samples
+        samples = (np.sin(2 * np.pi * np.arange(fs * duration) * f / fs)).astype(np.float32)
+
+        # Open stream and play
+        stream = p.open(format=pyaudio.paFloat32, channels=1, rate=fs, output=True)
+        stream.write(volume * samples)
+
+        # Clean up
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+    except Exception as e:
+        print(f"Error playing chime: {e}")
+
 
 def voice_listener():
     """
@@ -78,6 +103,7 @@ def voice_listener():
                 print(f"Heard: '{text}'")
             if TRIGGER_WORD in text.lower():
                 print(f"Trigger word '{TRIGGER_WORD}' detected!")
+                play_chime() # Play the confirmation sound
                 trigger_word_event.set() # Signal that the word was heard
 
 def put_text_on_frame(frame, text, color):
@@ -178,7 +204,7 @@ def main():
         # -----------------------------------------------------------------
         print(f"Starting {REPLAY_DURATION_SECONDS}-second replay phase...")
         trigger_word_event.clear() # Clear event before starting replay
-        frame_delay = 1.0 / fps
+        frame_delay = 0.5 / fps
 
         for frame in list(capture_buffer):
             # Check if the trigger word was spoken to skip the replay
