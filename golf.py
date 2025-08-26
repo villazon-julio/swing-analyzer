@@ -2,7 +2,8 @@
 #
 # This application uses offline voice commands to control a capture/replay loop.
 # - Say "okay" to start recording a 5-second clip.
-# - During replay, say "okay" again to skip the replay and return to listening.
+# - Say "again" to repeat the last replay.
+# - During replay, say "okay" to skip the replay and return to listening.
 #
 # Created by Gemini
 #
@@ -32,23 +33,30 @@ from vosk import Model, KaldiRecognizer
 CAMERA_INDEX = 0
 
 # Duration of the capture and replay in seconds.
-REPLAY_DURATION_SECONDS = 5
+REPLAY_DURATION_SECONDS = 4
 
 # Keyword to start recording and skip replay.
 TRIGGER_WORD = "okay"
 
+# Keyword to repeat the last replay.
+REPEAT_TRIGGER_WORD = "otra"
+
 # Path to the Vosk model folder.
 # Assumes the model folder is in the same directory as the script.
 # UPDATE THIS if you place the model folder elsewhere.
-MODEL_PATH = "vosk-model-small-en-us-0.15"
+# English
+# MODEL_PATH = "vosk-model-small-en-us-0.15"
+# Spanish
+MODEL_PATH = "vosk-model-small-es-0.42"
 
 # Path to the confirmation chime sound file.
 CHIME_WAV_PATH = "chime.wav"
 
 # --- End of Configuration ----------------------------------------------------
 
-# A thread-safe event to signal that the trigger word has been spoken.
-trigger_word_event = threading.Event()
+# Thread-safe events to signal which command was heard.
+start_record_event = threading.Event()
+repeat_replay_event = threading.Event()
 
 def play_chime():
     """Plays a .wav file as an audible confirmation."""
@@ -84,14 +92,12 @@ def play_chime():
 
 def voice_listener():
     """
-    Listens for the trigger word in the background using the offline Vosk engine.
-    This function runs in a separate thread.
+    Listens for trigger words in the background and sets the appropriate event.
     """
-    global trigger_word_event
+    global start_record_event, repeat_replay_event
 
     if not os.path.exists(MODEL_PATH):
         print(f"Vosk model not found at path: {MODEL_PATH}")
-        print("Please download the model, unzip it, and place it in the correct directory.")
         return
 
     model = Model(MODEL_PATH)
@@ -104,7 +110,7 @@ def voice_listener():
                     input=True,
                     frames_per_buffer=8192)
 
-    print("Voice listener thread started. Listening for the trigger word...")
+    print("Voice listener thread started. Listening for trigger words...")
 
     while True:
         data = stream.read(4096, exception_on_overflow=False)
@@ -113,10 +119,16 @@ def voice_listener():
             text = result.get('text', '')
             if text:
                 print(f"Heard: '{text}'")
-            if TRIGGER_WORD in text.lower():
+            
+            text_lower = text.lower()
+            if TRIGGER_WORD in text_lower:
                 print(f"Trigger word '{TRIGGER_WORD}' detected!")
-                play_chime() # Play the confirmation sound
-                trigger_word_event.set() # Signal that the word was heard
+                play_chime()
+                start_record_event.set()
+            elif REPEAT_TRIGGER_WORD in text_lower:
+                print(f"Repeat trigger word '{REPEAT_TRIGGER_WORD}' detected!")
+                play_chime()
+                repeat_replay_event.set()
 
 def put_text_on_frame(frame, text, color):
     """Utility function to draw styled text on a video frame."""
@@ -135,13 +147,35 @@ def put_text_on_frame(frame, text, color):
     cv2.putText(frame, text, (text_x, text_y), font, font_scale, color, thickness, cv2.LINE_AA)
     return frame
 
+def run_replay(capture_buffer, fps, window_name):
+    """Handles the replay phase logic."""
+    print(f"Starting {REPLAY_DURATION_SECONDS}-second replay phase...")
+    start_record_event.clear() # Clear event before starting replay
+    frame_delay = 0.5 / fps
+
+    for frame in list(capture_buffer):
+        # Check if the trigger word was spoken to skip the replay
+        if start_record_event.is_set():
+            print("Trigger word detected. Skipping replay.")
+            break
+
+        replay_start_time = time.time()
+        display_frame = frame.copy()
+        display_frame = put_text_on_frame(display_frame, "REPLAY", (0, 255, 0)) # Green
+        cv2.imshow(window_name, display_frame)
+
+        processing_time = time.time() - replay_start_time
+        wait_time = max(1, int((frame_delay - processing_time) * 1000))
+
+        if cv2.waitKey(wait_time) & 0xFF == ord('q'):
+            return False # Signal to quit
+    return True # Signal to continue
 
 def main():
     """Main function to run the capture-replay loop with voice control."""
     print("Starting Instant Replay application...")
     print("Press 'q' in the video window to quit.")
 
-    # Start the voice listener in a background daemon thread
     listener_thread = threading.Thread(target=voice_listener, daemon=True)
     listener_thread.start()
 
@@ -159,21 +193,24 @@ def main():
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1280, 720)
 
-    # Main application loop - State machine: LISTENING -> RECORDING -> REPLAYING
+    last_capture_buffer = None
+
     while True:
         # -----------------------------------------------------------------
         # 1. LISTENING PHASE
         # -----------------------------------------------------------------
-        print(f"\nListening for trigger word '{TRIGGER_WORD}'...")
-        trigger_word_event.clear() # Ensure event is clear before listening
-        while not trigger_word_event.is_set():
+        print(f"\nListening for '{TRIGGER_WORD}' or '{REPEAT_TRIGGER_WORD}'...")
+        start_record_event.clear()
+        repeat_replay_event.clear()
+        
+        while not start_record_event.is_set() and not repeat_replay_event.is_set():
             ret, frame = cap.read()
             if not ret:
                 print("Error: Failed to grab frame.")
                 break
 
             display_frame = frame.copy()
-            text = f"SAY '{TRIGGER_WORD.upper()}' TO RECORD"
+            text = f"SAY '{TRIGGER_WORD.upper()}' TO RECORD OR '{REPEAT_TRIGGER_WORD.upper()}' TO REPEAT"
             display_frame = put_text_on_frame(display_frame, text, (255, 255, 0)) # Cyan
             cv2.imshow(window_name, display_frame)
 
@@ -181,61 +218,49 @@ def main():
                 cap.release()
                 cv2.destroyAllWindows()
                 return
+        
+        # Check which command was received
+        if start_record_event.is_set():
+            # -----------------------------------------------------------------
+            # 2. CAPTURE PHASE
+            # -----------------------------------------------------------------
+            print(f"\nStarting {REPLAY_DURATION_SECONDS}-second capture phase...")
+            current_capture_buffer = collections.deque()
+            start_time = time.time()
 
-        # -----------------------------------------------------------------
-        # 2. CAPTURE PHASE
-        # -----------------------------------------------------------------
-        print(f"\nStarting {REPLAY_DURATION_SECONDS}-second capture phase...")
-        capture_buffer = collections.deque()
-        start_time = time.time()
+            while time.time() - start_time < REPLAY_DURATION_SECONDS:
+                ret, frame = cap.read()
+                if not ret:
+                    print("Error: Failed to grab frame.")
+                    break
+                current_capture_buffer.append(frame)
 
-        while time.time() - start_time < REPLAY_DURATION_SECONDS:
-            ret, frame = cap.read()
-            if not ret:
-                print("Error: Failed to grab frame.")
-                break
-            capture_buffer.append(frame)
+                display_frame = frame.copy()
+                countdown = REPLAY_DURATION_SECONDS - (time.time() - start_time)
+                rec_text = f"RECORDING... ({countdown:.1f}s)"
+                display_frame = put_text_on_frame(display_frame, rec_text, (0, 0, 255)) # Red
+                cv2.imshow(window_name, display_frame)
 
-            display_frame = frame.copy()
-            countdown = REPLAY_DURATION_SECONDS - (time.time() - start_time)
-            rec_text = f"RECORDING... ({countdown:.1f}s)"
-            display_frame = put_text_on_frame(display_frame, rec_text, (0, 0, 255)) # Red
-            cv2.imshow(window_name, display_frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    return
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                cap.release()
-                cv2.destroyAllWindows()
-                return
+            if not current_capture_buffer:
+                print("Capture buffer is empty. Returning to listening mode.")
+                continue
+            
+            last_capture_buffer = current_capture_buffer
+            if not run_replay(last_capture_buffer, fps, window_name):
+                break # Quit if 'q' was pressed during replay
 
-        if not capture_buffer:
-            print("Capture buffer is empty. Returning to listening mode.")
-            continue
-
-        # -----------------------------------------------------------------
-        # 3. REPLAY PHASE
-        # -----------------------------------------------------------------
-        print(f"Starting {REPLAY_DURATION_SECONDS}-second replay phase...")
-        trigger_word_event.clear() # Clear event before starting replay
-        frame_delay = 0.5 / fps
-
-        for frame in list(capture_buffer):
-            # Check if the trigger word was spoken to skip the replay
-            if trigger_word_event.is_set():
-                print("Trigger word detected. Skipping replay.")
-                break
-
-            replay_start_time = time.time()
-            display_frame = frame.copy()
-            display_frame = put_text_on_frame(display_frame, "REPLAY", (0, 255, 0)) # Green
-            cv2.imshow(window_name, display_frame)
-
-            processing_time = time.time() - replay_start_time
-            wait_time = max(1, int((frame_delay - processing_time) * 1000))
-
-            if cv2.waitKey(wait_time) & 0xFF == ord('q'):
-                cap.release()
-                cv2.destroyAllWindows()
-                return
+        elif repeat_replay_event.is_set():
+            if last_capture_buffer:
+                if not run_replay(last_capture_buffer, fps, window_name):
+                    break # Quit if 'q' was pressed during replay
+            else:
+                print("No replay available to repeat.")
+                time.sleep(1) # Brief pause to prevent spamming the console
 
     print("Exiting application.")
     cap.release()
