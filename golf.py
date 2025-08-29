@@ -231,13 +231,17 @@ def main():
         return
 
     # Set camera properties as requested
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Swap width and height for text positioning on rotated frame
+    width, height = height, width
+
     camera_name = get_camera_name(CAMERA_INDEX)
     print(f"Camera feed opened successfully at {width}x{height}, {fps:.2f} FPS.")
 
@@ -265,6 +269,9 @@ def main():
             print("Error: Failed to grab frame.")
             break
         
+        # Rotate the frame 90 degrees clockwise
+        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        
         # --- Handle State Changes ---
         if shared_state["toggle_info"].is_set():
             show_info = not show_info
@@ -280,6 +287,9 @@ def main():
             while time.time() - start_time < REPLAY_DURATION_SECONDS:
                 ret_cap, frame_cap = cap.read()
                 if not ret_cap: break
+                
+                # Rotate the captured frame as well
+                frame_cap = cv2.rotate(frame_cap, cv2.ROTATE_90_CLOCKWISE)
                 current_capture_buffer.append(frame_cap)
                 
                 # Draw overlays during capture
