@@ -270,7 +270,7 @@ def main():
             break
         
         # Rotate the frame 90 degrees clockwise
-        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
         
         # --- Handle State Changes ---
         if shared_state["toggle_info"].is_set():
@@ -289,7 +289,7 @@ def main():
                 if not ret_cap: break
                 
                 # Rotate the captured frame as well
-                frame_cap = cv2.rotate(frame_cap, cv2.ROTATE_90_CLOCKWISE)
+                frame_cap = cv2.rotate(frame_cap, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 current_capture_buffer.append(frame_cap)
                 
                 # Draw overlays during capture
