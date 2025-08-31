@@ -26,7 +26,10 @@ import os
 import sys
 import pyaudio
 import wave
-from vosk import Model, KaldiRecognizer
+from vosk import Model, KaldiRecognizer, SetLogLevel
+
+# --- Silence Vosk Log Output ---
+SetLogLevel(-1)
 
 # --- Helper function for PyInstaller ---
 def resource_path(relative_path):
@@ -231,8 +234,8 @@ def main():
         return
 
     # Set camera properties as requested
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0

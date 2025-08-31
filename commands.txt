@@ -12,4 +12,4 @@ ffmpeg -hide_banner -loglevel warning \
   -fflags +genpts -use_wallclock_as_timestamps 1 \
   -fps_mode cfr -r 30 \
   -vf scale=in_range=full:out_range=limited,format=yuv420p \
-  -pix_fmt yuv420p -f v4l2 /dev/video10
+  -pix_fmt yuv420p -f v4l2 /dev/video0
