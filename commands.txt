@@ -1,5 +1,15 @@
 Camera
 
 gphoto2 --auto-detect
-sudo modprobe v4l2loopback
-gphoto2 --stdout --capture-movie | ffmpeg -i - -vcodec rawvideo -pix_fmt yuv420p -threads 0 -f v4l2 /dev/video0
+
+sudo modprobe v4l2loopback exclusive_caps=1 card_label="Canon R6" video_nr=0 max_buffers=2
+
+ls -l /dev/video*
+
+gphoto2 --stdout --capture-movie | \
+ffmpeg -hide_banner -loglevel warning \
+  -f mjpeg -probesize 32k -analyzeduration 0 -re -i - \
+  -fflags +genpts -use_wallclock_as_timestamps 1 \
+  -fps_mode cfr -r 30 \
+  -vf scale=in_range=full:out_range=limited,format=yuv420p \
+  -pix_fmt yuv420p -f v4l2 /dev/video10
