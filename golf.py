@@ -44,6 +44,7 @@ def resource_path(relative_path):
 # --- Configuration -----------------------------------------------------------
 # The index of your camera. 0 is usually the default built-in webcam.
 CAMERA_INDEX = 0
+MIC_INDEX = 1
 REPLAY_DURATION_SECONDS = 4
 
 # Spanish Voice Commands
@@ -118,7 +119,14 @@ def voice_listener():
     model = Model(MODEL_PATH)
     recognizer = KaldiRecognizer(model, 16000)
     p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8192)
+    stream = p.open(
+        format=pyaudio.paInt16,
+        channels=1,
+        rate=16000,
+        input=True,
+        frames_per_buffer=8192,
+        input_device_index=MIC_INDEX  # <-- Add this line
+    )
     print("Voice listener thread started. Listening for trigger words...")
 
     while not shared_state["exit_app"].is_set():
@@ -234,8 +242,9 @@ def main():
         return
 
     # Set camera properties as requested
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -304,7 +313,12 @@ def main():
                 text_x = (width - text_size[0]) // 2
                 
                 display_frame = put_text_on_frame(frame_cap.copy(), rec_text, (text_x, 50), color=(0,0,255), font_scale=1.2, thickness=3)
-                display_frame = put_text_on_frame(display_frame, f"Swing Count: {swing_count}", (20, 50))
+                # Lower right corner for swing count
+                swing_text = f"Swing Count: {swing_count}"
+                swing_size, _ = cv2.getTextSize(swing_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+                swing_x = width - swing_size[0] - 20
+                swing_y = height - 40
+                display_frame = put_text_on_frame(display_frame, swing_text, (swing_x, swing_y), font_scale=1.0, thickness=2)
                 cv2.imshow(window_name, display_frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     shared_state["exit_app"].set()
@@ -334,30 +348,43 @@ def main():
         text_x = (width - text_size[0]) // 2
         display_frame = put_text_on_frame(display_frame, listen_text, (text_x, 50), color=(255, 255, 0), font_scale=1.2, thickness=3)
         
-        # Swing count
-        display_frame = put_text_on_frame(display_frame, f"Swing Count: {swing_count}", (20, 50))
+        # Swing count in lower right corner
+        swing_text = f"Swing Count: {swing_count}"
+        swing_size, _ = cv2.getTextSize(swing_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+        swing_x = width - swing_size[0] - 20
+        swing_y = height - 40
+        display_frame = put_text_on_frame(display_frame, swing_text, (swing_x, swing_y), font_scale=1.0, thickness=2)
         
-        # Last heard command
+        # Last heard command (match swing count font size and thickness)
         last_command = shared_state["last_heard_command"][0]
         if last_command:
-            display_frame = put_text_on_frame(display_frame, f"Comando: {last_command}", (20, height - 40), font_scale=0.8)
+            display_frame = put_text_on_frame(
+                display_frame,
+                last_command,
+                (20, height - 40),
+                font_scale=1.0,
+                thickness=2
+            )
 
         # Info popup
         if show_info:
-            # Dynamically calculate the position for right-alignment
+            # Center the info menu both vertically and horizontally
             font_scale_info = 0.7
             thickness_info = 2
-            max_line_width = 0
+            line_heights = []
+            line_widths = []
             for line in info_text_lines:
-                line_width, _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale_info, thickness_info)[0]
-                if line_width > max_line_width:
-                    max_line_width = line_width
-            
-            # Position menu with a 20px margin from the right edge
-            menu_x = width - max_line_width - 30 # 20px margin + 10px padding
-            
+                (line_width, line_height), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale_info, thickness_info)
+                line_widths.append(line_width)
+                line_heights.append(line_height)
+            max_line_width = max(line_widths)
+            total_height = sum(line_heights) + (len(info_text_lines) - 1) * 20
+            # Center menu
+            menu_x = (width - max_line_width) // 2
+            menu_y = (height - total_height) // 2 + line_heights[0]
             for i, line in enumerate(info_text_lines):
-                display_frame = put_text_on_frame(display_frame, line, (menu_x, 50 + i * 40), font_scale=font_scale_info, thickness=thickness_info)
+                y = menu_y + i * (line_heights[i] + 20)
+                display_frame = put_text_on_frame(display_frame, line, (menu_x, y), font_scale=font_scale_info, thickness=thickness_info)
 
         cv2.imshow(window_name, display_frame)
 

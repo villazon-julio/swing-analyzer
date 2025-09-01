@@ -1,4 +1,4 @@
-Camera
+Camera Canon R6
 
 gphoto2 --auto-detect
 
@@ -13,3 +13,15 @@ ffmpeg -hide_banner -loglevel warning \
   -fps_mode cfr -r 30 \
   -vf scale=in_range=full:out_range=limited,format=yuv420p \
   -pix_fmt yuv420p -f v4l2 /dev/video0
+
+
+  Running the code without logs
+
+  /home/juliovillazon/Documents/Projects/swing-analyzer/.venv/bin/python golf.py 2>/dev/null
+
+
+  Webcam settings
+
+  v4l2-ctl --list-devices
+
+  v4l2-ctl --device=/dev/video0 --list-formats-ext
