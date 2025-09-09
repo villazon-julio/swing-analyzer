@@ -1,3 +1,5 @@
+import os
+os.system("amixer set 'Master' 100%")
 # GOLF SWING INSTANT REPLAY (OFFLINE VOICE CONTROL - SPANISH)
 #
 # This application uses offline Spanish voice commands to control a capture/replay loop.
