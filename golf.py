@@ -29,10 +29,11 @@ import os
 import sys
 import pyaudio
 import wave
+import subprocess
 from vosk import Model, KaldiRecognizer, SetLogLevel
 
 # --- Global swing counter persistence ---
-GLOBAL_SWING_FILE = os.path.expanduser("~/.golf_global_swings.json")
+GLOBAL_SWING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golf_global_swings.json")
 def load_global_swings():
     try:
         with open(GLOBAL_SWING_FILE, 'r') as f:
@@ -87,7 +88,9 @@ shared_state = {
     "exit_app": threading.Event(),
     "toggle_info": threading.Event(),
     "replay_speed_factor": [4.0], # Start at 25% speed (4.0x slower)
-    "last_heard_command": [""] # To display the last command
+    "last_heard_command": [""], # To display the last command
+    "confirm_exit": threading.Event(),
+    "exit_confirmed": [False],
 }
 
 def get_camera_name(device_index):
@@ -107,27 +110,16 @@ def get_camera_name(device_index):
 
 
 def play_chime():
-    """Plays a .wav file as an audible confirmation."""
-    if not os.path.exists(CHIME_WAV_PATH):
-        print(f"Chime file not found: {CHIME_WAV_PATH}")
-        return
-    try:
-        wf = wave.open(CHIME_WAV_PATH, 'rb')
-        p = pyaudio.PyAudio()
-        stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
-                        channels=wf.getnchannels(),
-                        rate=wf.getframerate(),
-                        output=True)
-        data = wf.readframes(1024)
-        while data:
-            stream.write(data)
-            data = wf.readframes(1024)
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-        wf.close()
-    except Exception as e:
-        print(f"Error playing chime: {e}")
+    """Plays a .wav file as an audible confirmation in a separate thread using a system command for reliability."""
+    def _play():
+        if not os.path.exists(CHIME_WAV_PATH):
+            print(f"Chime file not found: {CHIME_WAV_PATH}")
+            return
+        try:
+            subprocess.Popen(['aplay', CHIME_WAV_PATH])
+        except Exception as e:
+            print(f"Error playing chime: {e}")
+    threading.Thread(target=_play, daemon=True).start()
 
 def voice_listener():
     """Listens for trigger words and updates the shared state."""
@@ -162,9 +154,22 @@ def voice_listener():
             # Normalize text for command matching
             text_lower = text.lower().replace('á', 'a').replace('ú', 'u')
 
+            # If waiting for exit confirmation, listen for 'salir' or 'cancelar'
+            if shared_state["confirm_exit"].is_set():
+                if "salir" in text_lower:
+                    print("Exit confirmed by voice.")
+                    shared_state["exit_confirmed"][0] = True
+                    shared_state["exit_app"].set()
+                    shared_state["confirm_exit"].clear()
+                elif "cancelar" in text_lower:
+                    print("Exit cancelled by voice.")
+                    shared_state["exit_confirmed"][0] = False
+                    shared_state["confirm_exit"].clear()
+                continue
+
             if EXIT_WORD in text_lower:
                 print(f"Exit word '{EXIT_WORD}' detected!")
-                shared_state["exit_app"].set()
+                shared_state["confirm_exit"].set()
             elif TRIGGER_WORD in text_lower:
                 print(f"Trigger word '{TRIGGER_WORD}' detected!")
                 play_chime()
@@ -296,6 +301,43 @@ def main():
     show_info = False
     
     while not shared_state["exit_app"].is_set():
+        # If exit confirmation is requested, show popup and wait for spoken response
+        if shared_state["confirm_exit"].is_set():
+            # Draw popup
+            display_frame = frame.copy()
+            popup_text = "Estas seguro que quieres salir?"
+            sub_text = "Diga su respuesta"
+            option1 = "Salir"
+            option2 = "Cancelar"
+            # Center popup
+            font_scale = 1.2
+            thickness = 3
+            font_scale_sub = 0.9
+            thickness_sub = 2
+            font_scale_opt = 1.0
+            thickness_opt = 2
+            # Main text
+            text_size, _ = cv2.getTextSize(popup_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+            text_x = (width - text_size[0]) // 2
+            text_y = height // 2 - 40
+            display_frame = put_text_on_frame(display_frame, popup_text, (text_x, text_y), color=(0,0,255), font_scale=font_scale, thickness=thickness)
+            # Subheading
+            sub_size, _ = cv2.getTextSize(sub_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale_sub, thickness_sub)
+            sub_x = (width - sub_size[0]) // 2
+            sub_y = text_y + 50
+            display_frame = put_text_on_frame(display_frame, sub_text, (sub_x, sub_y), color=(255,255,0), font_scale=font_scale_sub, thickness=thickness_sub)
+            # Options
+            opt1_size, _ = cv2.getTextSize(option1, cv2.FONT_HERSHEY_SIMPLEX, font_scale_opt, thickness_opt)
+            opt2_size, _ = cv2.getTextSize(option2, cv2.FONT_HERSHEY_SIMPLEX, font_scale_opt, thickness_opt)
+            opt1_x = (width // 2) - opt1_size[0] - 30
+            opt2_x = (width // 2) + 30
+            opt_y = sub_y + 60
+            display_frame = put_text_on_frame(display_frame, option1, (opt1_x, opt_y), color=(0,255,0), font_scale=font_scale_opt, thickness=thickness_opt)
+            display_frame = put_text_on_frame(display_frame, option2, (opt2_x, opt_y), color=(0,255,255), font_scale=font_scale_opt, thickness=thickness_opt)
+            cv2.imshow(window_name, display_frame)
+            cv2.waitKey(100)
+            # Wait for spoken response (handled in voice_listener)
+            continue
         ret, frame = cap.read()
         if not ret:
             print("Error: Failed to grab frame.")
@@ -332,8 +374,8 @@ def main():
                 text_x = (width - text_size[0]) // 2
                 display_frame = put_text_on_frame(frame_cap.copy(), rec_text, (text_x, 50), color=(0,0,255), font_scale=1.2, thickness=3)
                 # Lower right corner for swing counters (stacked)
-                swing_text1 = f"Session Swings: {session_swings}"
-                swing_text2 = f"All-Time Swings: {global_swings}"
+                swing_text1 = f"Session: {session_swings}"
+                swing_text2 = f"All-Time: {global_swings}"
                 swing_size1, _ = cv2.getTextSize(swing_text1, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
                 swing_size2, _ = cv2.getTextSize(swing_text2, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
                 swing_x = width - max(swing_size1[0], swing_size2[0]) - 20
@@ -369,8 +411,8 @@ def main():
         display_frame = put_text_on_frame(display_frame, listen_text, (text_x, 50), color=(255, 255, 0), font_scale=1.2, thickness=3)
         
         # Swing counters in lower right corner (stacked)
-        swing_text1 = f"Session Swings: {session_swings}"
-        swing_text2 = f"All-Time Swings: {global_swings}"
+        swing_text1 = f"Session: {session_swings}"
+        swing_text2 = f"All-Time: {global_swings}"
         swing_size1, _ = cv2.getTextSize(swing_text1, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
         swing_size2, _ = cv2.getTextSize(swing_text2, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
         swing_x = width - max(swing_size1[0], swing_size2[0]) - 20
