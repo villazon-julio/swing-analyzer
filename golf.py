@@ -19,6 +19,7 @@ os.system("amixer set 'Master' 100%")
 #    in the same directory as this Python script.
 # 4. Place a sound file named "chime.wav" in the same directory as this script.
 
+
 import cv2
 import time
 import collections
@@ -29,6 +30,22 @@ import sys
 import pyaudio
 import wave
 from vosk import Model, KaldiRecognizer, SetLogLevel
+
+# --- Global swing counter persistence ---
+GLOBAL_SWING_FILE = os.path.expanduser("~/.golf_global_swings.json")
+def load_global_swings():
+    try:
+        with open(GLOBAL_SWING_FILE, 'r') as f:
+            return int(json.load(f)["global_swings"])
+    except Exception:
+        return 0
+
+def save_global_swings(count):
+    try:
+        with open(GLOBAL_SWING_FILE, 'w') as f:
+            json.dump({"global_swings": count}, f)
+    except Exception:
+        pass
 
 # --- Silence Vosk Log Output ---
 SetLogLevel(-1)
@@ -69,7 +86,7 @@ shared_state = {
     "repeat_replay": threading.Event(),
     "exit_app": threading.Event(),
     "toggle_info": threading.Event(),
-    "replay_speed_factor": [2.0], # Start at half speed (2.0x slower)
+    "replay_speed_factor": [4.0], # Start at 25% speed (4.0x slower)
     "last_heard_command": [""] # To display the last command
 }
 
@@ -274,7 +291,8 @@ def main():
     cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     last_capture_buffer = None
-    swing_count = 0
+    session_swings = 0
+    global_swings = load_global_swings()
     show_info = False
     
     while not shared_state["exit_app"].is_set():
@@ -293,7 +311,9 @@ def main():
 
         # --- Handle Voice Commands ---
         if shared_state["start_record"].is_set():
-            swing_count += 1
+            session_swings += 1
+            global_swings += 1
+            save_global_swings(global_swings)
             # --- CAPTURE PHASE ---
             print(f"\nStarting {REPLAY_DURATION_SECONDS}-second capture phase...")
             current_capture_buffer = collections.deque()
@@ -301,35 +321,33 @@ def main():
             while time.time() - start_time < REPLAY_DURATION_SECONDS:
                 ret_cap, frame_cap = cap.read()
                 if not ret_cap: break
-                
                 # Rotate the captured frame as well
                 frame_cap = cv2.rotate(frame_cap, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 current_capture_buffer.append(frame_cap)
-                
                 # Draw overlays during capture
                 countdown = REPLAY_DURATION_SECONDS - (time.time() - start_time)
                 rec_text = f"GRABANDO... ({countdown:.1f}s)"
-                
                 # Center the recording text
                 text_size, _ = cv2.getTextSize(rec_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
                 text_x = (width - text_size[0]) // 2
-                
                 display_frame = put_text_on_frame(frame_cap.copy(), rec_text, (text_x, 50), color=(0,0,255), font_scale=1.2, thickness=3)
-                # Lower right corner for swing count
-                swing_text = f"Swing Count: {swing_count}"
-                swing_size, _ = cv2.getTextSize(swing_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
-                swing_x = width - swing_size[0] - 20
-                swing_y = height - 40
-                display_frame = put_text_on_frame(display_frame, swing_text, (swing_x, swing_y), font_scale=1.0, thickness=2)
+                # Lower right corner for swing counters (stacked)
+                swing_text1 = f"Session Swings: {session_swings}"
+                swing_text2 = f"All-Time Swings: {global_swings}"
+                swing_size1, _ = cv2.getTextSize(swing_text1, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+                swing_size2, _ = cv2.getTextSize(swing_text2, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+                swing_x = width - max(swing_size1[0], swing_size2[0]) - 20
+                swing_y2 = height - 40
+                swing_y1 = swing_y2 - swing_size2[1] - 10
+                display_frame = put_text_on_frame(display_frame, swing_text1, (swing_x, swing_y1), font_scale=1.0, thickness=2)
+                display_frame = put_text_on_frame(display_frame, swing_text2, (swing_x, swing_y2), font_scale=1.0, thickness=2)
                 cv2.imshow(window_name, display_frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     shared_state["exit_app"].set()
                     break
-            
             if current_capture_buffer:
                 last_capture_buffer = current_capture_buffer
                 run_replay(last_capture_buffer, fps, window_name, width)
-
             # Reset for next listening phase
             shared_state["start_record"].clear()
 
@@ -350,12 +368,16 @@ def main():
         text_x = (width - text_size[0]) // 2
         display_frame = put_text_on_frame(display_frame, listen_text, (text_x, 50), color=(255, 255, 0), font_scale=1.2, thickness=3)
         
-        # Swing count in lower right corner
-        swing_text = f"Swing Count: {swing_count}"
-        swing_size, _ = cv2.getTextSize(swing_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
-        swing_x = width - swing_size[0] - 20
-        swing_y = height - 40
-        display_frame = put_text_on_frame(display_frame, swing_text, (swing_x, swing_y), font_scale=1.0, thickness=2)
+        # Swing counters in lower right corner (stacked)
+        swing_text1 = f"Session Swings: {session_swings}"
+        swing_text2 = f"All-Time Swings: {global_swings}"
+        swing_size1, _ = cv2.getTextSize(swing_text1, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+        swing_size2, _ = cv2.getTextSize(swing_text2, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+        swing_x = width - max(swing_size1[0], swing_size2[0]) - 20
+        swing_y2 = height - 40
+        swing_y1 = swing_y2 - swing_size2[1] - 10
+        display_frame = put_text_on_frame(display_frame, swing_text1, (swing_x, swing_y1), font_scale=1.0, thickness=2)
+        display_frame = put_text_on_frame(display_frame, swing_text2, (swing_x, swing_y2), font_scale=1.0, thickness=2)
         
         # Last heard command (match swing count font size and thickness)
         last_command = shared_state["last_heard_command"][0]
