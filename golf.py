@@ -164,6 +164,10 @@ def voice_listener():
                     print("Exit cancelled by voice.")
                     shared_state["exit_confirmed"][0] = False
                     shared_state["confirm_exit"].clear()
+                elif "apagar" in text_lower:
+                    print("Shutdown confirmed by voice.")
+                    shared_state["confirm_exit"].clear()
+                    os.system('sudo shutdown now')
                 continue
 
             if EXIT_WORD in text_lower:
@@ -308,6 +312,7 @@ def main():
             sub_text = "Diga su respuesta"
             option1 = "Salir"
             option2 = "Cancelar"
+            option3 = "Apagar"
             # Center popup
             font_scale = 1.2
             thickness = 3
@@ -328,11 +333,16 @@ def main():
             # Options
             opt1_size, _ = cv2.getTextSize(option1, cv2.FONT_HERSHEY_SIMPLEX, font_scale_opt, thickness_opt)
             opt2_size, _ = cv2.getTextSize(option2, cv2.FONT_HERSHEY_SIMPLEX, font_scale_opt, thickness_opt)
-            opt1_x = (width // 2) - opt1_size[0] - 30
-            opt2_x = (width // 2) + 30
+            opt3_size, _ = cv2.getTextSize(option3, cv2.FONT_HERSHEY_SIMPLEX, font_scale_opt, thickness_opt)
+            total_width = opt1_size[0] + opt2_size[0] + opt3_size[0] + 80
+            start_x = (width - total_width) // 2
+            opt1_x = start_x
+            opt2_x = opt1_x + opt1_size[0] + 40
+            opt3_x = opt2_x + opt2_size[0] + 40
             opt_y = sub_y + 60
             display_frame = put_text_on_frame(display_frame, option1, (opt1_x, opt_y), color=(0,255,0), font_scale=font_scale_opt, thickness=thickness_opt)
             display_frame = put_text_on_frame(display_frame, option2, (opt2_x, opt_y), color=(0,255,255), font_scale=font_scale_opt, thickness=thickness_opt)
+            display_frame = put_text_on_frame(display_frame, option3, (opt3_x, opt_y), color=(255,0,0), font_scale=font_scale_opt, thickness=thickness_opt)
             cv2.imshow(window_name, display_frame)
             cv2.waitKey(100)
             # Wait for spoken response (handled in voice_listener)
