@@ -28,7 +28,6 @@ import json
 import os
 import sys
 import pyaudio
-import wave
 import subprocess
 from vosk import Model, KaldiRecognizer, SetLogLevel
 

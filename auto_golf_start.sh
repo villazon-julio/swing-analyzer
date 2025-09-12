@@ -4,8 +4,8 @@ export XAUTHORITY=/home/juliovillazon/.Xauthority
 exec >> /tmp/golf_autostart_debug.log 2>&1
 set -x
 
-# Wait 30 seconds after boot
-sleep 30
+# Wait 15 seconds after boot
+sleep 15
 
 # Check for connected Bluetooth audio devices
 BT_CONNECTED=$(bluetoothctl info | grep "Connected: yes")
